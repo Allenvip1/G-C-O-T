@@ -1,0 +1,30 @@
+name: 更新COT数据
+
+on:
+  schedule:
+    - cron: "0 22 * * 5"   # 每周五 22:00 UTC（CFTC 周五美东 15:30 发布）
+    - cron: "0 22 * * 6"   # 周六再补一次，防止周五延迟发布
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 下载并生成 cot.json
+        run: python scripts/fetch_cot.py
+      - name: 有变化则提交
+        run: |
+          if [ -n "$(git status --porcelain docs)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs
+            git commit -m "chore: update COT data"
+            git push
+          fi

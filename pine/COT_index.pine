@@ -1,0 +1,53 @@
+//@version=6
+indicator("COT 指数 商业/大户/散户 [Jackson]", shorttitle="COT指数 [Jackson]", overlay=false)
+
+import TradingView/LibraryCOT/6 as cot
+
+// ───────── 设置 ─────────
+G1 = "数据设置"
+product        = input.string("", "CFTC代码（留空=自动识别）", group=G1, tooltip="留空时按当前品种自动映射；映射不到时请手动填入6位CFTC代码，如黄金 088691")
+includeOptions = input.bool(true, "包含期权（Futures+Options）", group=G1)
+G2 = "算法设置"
+lookback = input.int(156, "回看周数", minval=10, group=G2, tooltip="COT指数 = (当前净持仓 − 回看期最低) / (回看期最高 − 回看期最低) × 100。156周≈3年，52周≈1年")
+G3 = "显示设置"
+showComm  = input.bool(true, "显示 商业套保（Producer/Merchant）", group=G3)
+showLarge = input.bool(true, "显示 大户（Managed Money）", group=G3)
+showSmall = input.bool(true, "显示 散户（Other Reportables）", group=G3)
+colComm   = input.color(#2962FF, "商业套保 颜色", group=G3)
+colLarge  = input.color(#26A69A, "大户 颜色", group=G3)
+colSmall  = input.color(#EF5350, "散户 颜色", group=G3)
+hiLevel   = input.float(80, "高位线", group=G3)
+loLevel   = input.float(20, "低位线", group=G3)
+
+// ───────── 品种自动映射 ─────────
+get_code() =>
+    switch syminfo.root
+        "GC" or "MGC" or "GLD" => "088691"
+        "SI" or "SIL" or "SLV" => "084691"
+        => na
+
+root = product == "" ? get_code() : product
+if na(root)
+    runtime.error("当前品种无自动映射，请在设置里手动填入CFTC代码")
+if not timeframe.isweekly
+    runtime.error("COT指数按周计算，请切换到周线（W）")
+
+// ───────── 读取 Disaggregated 报告持仓 ─────────
+req(name, dir) => cot.requestCommitmentOfTraders("Disaggregated", root, includeOptions, name, dir, "All")
+
+commNet  = req("Producer/Merchant/Processor/User", "Long") - req("Producer/Merchant/Processor/User", "Short")
+largeNet = req("Managed Money", "Long") - req("Managed Money", "Short")
+smallNet = req("Other Reportables", "Long") - req("Other Reportables", "Short")
+
+// ───────── COT 指数（0-100 归一化）─────────
+cotIndex(net) =>
+    lo = ta.lowest(net, lookback)
+    hi = ta.highest(net, lookback)
+    hi == lo ? 50.0 : (net - lo) / (hi - lo) * 100
+
+hline(hiLevel, "高位线", color.new(color.gray, 60), hline.style_dotted)
+hline(50, "中位线", color.new(color.gray, 50), hline.style_dashed)
+hline(loLevel, "低位线", color.new(color.gray, 60), hline.style_dotted)
+plot(showComm  ? cotIndex(commNet)  : na, "商业套保指数", colComm,  2)
+plot(showLarge ? cotIndex(largeNet) : na, "大户指数",     colLarge, 2)
+plot(showSmall ? cotIndex(smallNet) : na, "散户指数",     colSmall, 2)
