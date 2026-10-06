@@ -91,7 +91,7 @@ function build(code){
   col.className = 'col';
   col.innerHTML = `<h2>${c.name}</h2>
     <div class="card"><h3>净持仓（多头 − 空头，手数）</h3><div class="chart"></div></div>
-    <div class="card"><h3>COT 指数（0–100）= (净持仓 − 回看期最低) / (最高 − 最低) × 100</h3><div class="chart"></div></div>
+    <div class="card"><h3>COT 指数（0–100）</h3><div class="chart"></div></div>
     <div class="card"><h3>最近 8 周</h3><div class="tbw"><table class="cot-tb"></table></div></div>`;
   document.getElementById('grid').appendChild(col);
   const [e1, e2] = col.querySelectorAll('.chart');
