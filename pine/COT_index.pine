@@ -8,7 +8,7 @@ G1 = "数据设置"
 product        = input.string("", "CFTC代码（留空=自动识别）", group=G1, tooltip="留空时按当前品种自动映射；映射不到时请手动填入6位CFTC代码，如黄金 088691")
 includeOptions = input.bool(true, "包含期权（Futures+Options）", group=G1)
 G2 = "算法设置"
-lookback = input.int(156, "回看周数", minval=10, group=G2, tooltip="COT指数 = (当前净持仓 − 回看期最低) / (回看期最高 − 回看期最低) × 100。156周≈3年，52周≈1年")
+lookback = input.int(26, "回看周数", minval=10, group=G2, tooltip="COT指数 = (当前净持仓 − 回看期最低) / (回看期最高 − 回看期最低) × 100。默认26周（半年），经与视频曲线拟合验证；52周≈1年，156周≈3年")
 G3 = "显示设置"
 showComm  = input.bool(true, "显示 商业套保（Producer/Merchant）", group=G3)
 showLarge = input.bool(true, "显示 大户（Managed Money）", group=G3)

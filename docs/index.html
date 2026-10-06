@@ -37,7 +37,7 @@
   <h1>COT 指标看板（Disaggregated）</h1>
   <div class="sub" id="meta">加载中…</div>
   <div class="bar">
-    <label>COT指数回看周数 <input id="lb" type="number" min="10" value="156"></label>
+    <label>COT指数回看周数 <input id="lb" type="number" min="10" value="26"></label>
     <label>显示最近周数 <input id="vis" type="number" min="20" value="260"></label>
   </div>
   <div class="legend">
@@ -109,7 +109,7 @@ function build(code){
   panels.push({c, net, idx, sNet, sIdx, tb: col.querySelector('table.cot-tb')});
 }
 function render(){
-  const lb = Math.max(10, +document.getElementById('lb').value||156);
+  const lb = Math.max(10, +document.getElementById('lb').value||26);
   const vis = Math.max(20, +document.getElementById('vis').value||260);
   const f = v => v==null ? '–' : `<span class="${v>=80?'hi':v<=20?'lo':''}">${v.toFixed(1)}</span>`;
   for(const p of panels){
