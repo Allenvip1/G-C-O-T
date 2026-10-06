@@ -1,5 +1,5 @@
 //@version=6
-indicator("COT 净持仓 商业/大户/散户 [Jackson]", shorttitle="COT净持仓 [Jackson]", overlay=false, format=format.volume)
+indicator("COT 净持仓 商业/大户/散户 [Jackson]", shorttitle="COT净持仓", overlay=false, format=format.volume)
 
 import TradingView/LibraryCOT/6 as cot
 
@@ -17,21 +17,19 @@ colSmall  = input.color(#EF5350, "散户 颜色", group=G2)
 
 // ───────── 品种自动映射 ─────────
 get_code() =>
-    switch syminfo.root
-        "GC" or "MGC" or "GLD" => "088691"
-        "SI" or "SIL" or "SLV" => "084691"
-        => na
+    r = syminfo.root
+    r == "GC" or r == "MGC" or r == "GLD" ? "088691" : r == "SI" or r == "SIL" or r == "SLV" ? "084691" : ""
 
 root = product == "" ? get_code() : product
-if na(root)
+if root == ""
     runtime.error("当前品种无自动映射，请在设置里手动填入CFTC代码")
 
 // ───────── 读取 Disaggregated 报告持仓 ─────────
 req(name, dir) => cot.requestCommitmentOfTraders("Disaggregated", root, includeOptions, name, dir, "All")
 
-commNet  = req("Producer/Merchant/Processor/User", "Long") - req("Producer/Merchant/Processor/User", "Short")
-largeNet = req("Managed Money", "Long") - req("Managed Money", "Short")
-smallNet = req("Other Reportables", "Long") - req("Other Reportables", "Short")
+commNet  = req("Producer Merchant Positions", "Long") - req("Producer Merchant Positions", "Short")
+largeNet = req("Managed Money Positions", "Long") - req("Managed Money Positions", "Short")
+smallNet = req("Other Reportable Positions", "Long") - req("Other Reportable Positions", "Short")
 
 hline(0, "零轴", color.new(color.gray, 50), hline.style_dashed)
 plot(showComm  ? commNet  : na, "商业套保净持仓", colComm,  2)
