@@ -53,6 +53,56 @@ def parse(blob):
                 yield code, row[i_date].strip(), {k: int(row[i].strip()) for k, i in idx.items()}
 
 
+PRICE_SYMS = {"088691": "GC=F", "084691": "SI=F"}  # COMEX 黄金、白银期货连续合约（Yahoo）
+PRICE_URL = "https://{host}/v8/finance/chart/{sym}?range=20y&interval=1wk"
+
+
+def fetch_weekly(sym):
+    """Yahoo 周线 -> [[周一日期, 开, 高, 低, 收], ...]；失败抛异常。"""
+    last = None
+    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+        url = PRICE_URL.format(host=host, sym=sym)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                res = json.loads(r.read().decode("utf-8"))["chart"]["result"][0]
+            break
+        except Exception as e:
+            last = e
+    else:
+        raise RuntimeError(last)
+    off, q = res["meta"]["gmtoffset"], res["indicators"]["quote"][0]
+    rows = []
+    for i, t in enumerate(res["timestamp"]):
+        if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]):
+            continue
+        day = datetime.fromtimestamp(t + off, timezone.utc).date().isoformat()
+        rows.append([day] + [round(q[k][i], 2) for k in ("open", "high", "low", "close")])
+    return sorted(rows)
+
+
+def embed_prices(page):
+    """抓周线并写进 index.html 的 price-data；任何品种失败都保留旧数据。"""
+    html = page.read_text(encoding="utf-8")
+    m = re.search(r'<script id="price-data">window\.PRICE_DATA=(.*?);</script>', html, re.S)
+    prices = json.loads(m.group(1)) if m else {}
+    for code, sym in PRICE_SYMS.items():
+        try:
+            rows = fetch_weekly(sym)
+            if len(rows) < 100:
+                raise ValueError(f"只取到 {len(rows)} 行")
+            prices[code] = rows
+            print(f"price {sym}: {len(rows)} weeks, {rows[0][0]} ~ {rows[-1][0]}")
+        except Exception as e:
+            print(f"warn: {sym} 周线抓取失败，保留旧数据：{e}", file=sys.stderr)
+    tag = '<script id="price-data">window.PRICE_DATA=' + json.dumps(prices, separators=(",", ":")) + ";</script>"
+    if m:
+        html = html[:m.start()] + tag + html[m.end():]
+    else:
+        html = html.replace('<script id="cot-data">', tag + "\n" + '<script id="cot-data">', 1)
+    page.write_text(html, encoding="utf-8")
+
+
 def main():
     full = "--full" in sys.argv
     store = {}  # code -> {date: rec}
@@ -98,6 +148,7 @@ def main():
                   lambda m: m.group(1) + "window.COT_DATA=" + blob.replace("</", "<\\/") + ";" + m.group(2),
                   html, count=1, flags=re.S)
     page.write_text(html, encoding="utf-8")
+    embed_prices(page)
     latest = max(c["dates"][-1] for c in out["contracts"].values())
     print(f"written {OUT}: {len(out['contracts'])} contracts, latest report date {latest}")
 
