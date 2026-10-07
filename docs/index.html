@@ -28,6 +28,9 @@
   th,td{padding:5px 8px;text-align:right;border-bottom:1px solid var(--line)}
   th:first-child,td:first-child{text-align:left}
   th{color:var(--mute);font-weight:600}
+  .tip{position:absolute;z-index:20;pointer-events:none;display:none;min-width:190px;background:var(--panel);color:var(--text);border:1px solid var(--mute);border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.7;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:nowrap}
+  .tip .h{color:var(--mute);border-bottom:1px solid var(--line);margin-bottom:3px;padding-bottom:2px}
+  .tip .r{display:flex;justify-content:space-between;gap:18px}.tip .r span:first-child{color:var(--mute)}
   .hi{color:#ef5350}.lo{color:#26a69a}
   @media (max-width:900px){.grid{grid-template-columns:1fr}.chart{height:240px}}
 </style>
@@ -88,6 +91,32 @@ function pts(dates, vals, from){
   for(let i=from;i<dates.length;i++) if(vals[i]!==null) out.push({time:dates[i], value:vals[i]});
   return out;
 }
+const NM = {comm:'商业套保', large:'大户', small:'散户'};
+const row = (a,b) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
+const num = v => v==null ? '–' : Math.round(v).toLocaleString();
+const sg = v => v==null ? '–' : (v>0?'+':'')+Math.round(v).toLocaleString();
+const ix = v => v==null ? '–' : `<span class="${v>=80?'hi':v<=20?'lo':''}">${v.toFixed(1)}</span>`;
+function showTip(a, param, p){
+  const tip = a.tip;
+  if(!param.time || !param.point || param.point.x<0 || param.point.y<0 || !p.di){ tip.style.display='none'; return; }
+  const t = param.time, i = p.di.get(t);
+  if(i==null){ tip.style.display='none'; return; }
+  let h = `<div class="h">${p.c.name.split(' ')[0]} · COT 报告日 ${t}</div>`;
+  if(a.k==='pr'){
+    const k = p.candle.get(t);
+    h += k ? row('开',k.open)+row('高',k.high)+row('低',k.low)+row('收',`<b>${k.close}</b>`)+row('当周涨跌',`<span class="${k.close>=k.open?'hi':'lo'}">${(k.close>=k.open?'+':'')+((k.close/k.open-1)*100).toFixed(2)}%</span>`) : row('当周无期货行情','');
+  } else if(a.k==='net'){
+    for(const k in COL){ const v=p.nets[k][i], pv=i>0?p.nets[k][i-1]:null;
+      h += row(`<span style="color:${COL[k]}">●</span> ${NM[k]}净持仓`, `<b>${num(v)}</b> 手（较上周 ${pv==null?'–':sg(v-pv)}）`); }
+  } else {
+    for(const k in COL) h += row(`<span style="color:${COL[k]}">●</span> ${NM[k]}COT指数`, ix(p.idxv[k][i]));
+  }
+  tip.innerHTML = h; tip.style.display='block';
+  const W=a.el.clientWidth, H=a.el.clientHeight, w=tip.offsetWidth, ht=tip.offsetHeight;
+  let x=param.point.x+18, y=param.point.y-ht/2;
+  if(x+w>W-4) x=param.point.x-w-18;
+  tip.style.left=Math.max(2,x)+'px'; tip.style.top=Math.max(2,Math.min(H-ht-2,y))+'px';
+}
 function build(code){
   const c = COT_DATA.contracts[code];
   const col = document.createElement('div');
@@ -110,15 +139,22 @@ function build(code){
   }
   [80,50,20].forEach(p=>sIdx.comm.createPriceLine({price:p, color:css('--line'), lineStyle:2, axisLabelVisible:false, title:''}));
   let busy=false;
-  const all=[{ch:pr,s:sPr,k:'pr'},{ch:net,s:sNet.comm,k:'net'},{ch:idx,s:sIdx.comm,k:'idx'}];
+  const all=[{ch:pr,s:sPr,k:'pr',el:e0},{ch:net,s:sNet.comm,k:'net',el:e1},{ch:idx,s:sIdx.comm,k:'idx',el:e2}];
+  let hover=null; const P={};
   const vals={pr:new Map(),net:new Map(),idx:new Map()};
   for(const a of all){
+    a.el.style.position='relative'; a.tip=document.createElement('div'); a.tip.className='tip'; a.el.appendChild(a.tip);
+    a.el.addEventListener('mouseenter',()=>{hover=a;});
+    a.el.addEventListener('mouseleave',()=>{ if(hover===a) hover=null; a.tip.style.display='none'; });
     a.ch.timeScale().subscribeVisibleLogicalRangeChange(r=>{ if(busy||!r) return; busy=true; all.forEach(o=>{ if(o!==a) o.ch.timeScale().setVisibleLogicalRange(r); }); busy=false; });
-    a.ch.subscribeCrosshairMove(param=>{ if(busy) return; busy=true;
+    a.ch.subscribeCrosshairMove(param=>{ if(busy) return;
+      if(!hover || hover===a) showTip(a, param, P.p);
+      if(hover && hover!==a) return; busy=true;
       all.forEach(o=>{ if(o===a) return; const v = param.time && vals[o.k].get(param.time); if(v==null) o.ch.clearCrosshairPosition(); else o.ch.setCrosshairPosition(v,param.time,o.s); });
       busy=false; });
   }
-  panels.push({code, c, pr, sPr, vals, net, idx, sNet, sIdx, tb: col.querySelector('table.cot-tb')});
+  const panel = {code, c, pr, sPr, vals, net, idx, sNet, sIdx, tb: col.querySelector('table.cot-tb')};
+  P.p = panel; panels.push(panel);
 }
 function render(){
   const lb = Math.max(10, +document.getElementById('lb').value||26);
@@ -141,6 +177,7 @@ function render(){
       if(w && t-Date.parse(w[0])<7*864e5 && t>=Date.parse(w[0])) cd.push({time:c.dates[i],open:w[1],high:w[2],low:w[3],close:w[4]});
     }
     p.sPr.setData(cd);
+    p.nets=nets; p.idxv=idx; p.di=new Map(c.dates.map((d,i)=>[d,i])); p.candle=new Map(cd.map(x=>[x.time,x]));
     p.vals.pr=new Map(cd.map(x=>[x.time,x.close]));
     p.vals.net=new Map(pts(c.dates, nets.comm, from).map(x=>[x.time,x.value]));
     p.vals.idx=new Map(pts(c.dates, idx.comm, from).map(x=>[x.time,x.value]));
