@@ -9,7 +9,7 @@
 首次运行（或加 --full）会下载 START_YEAR 起的全部历史。
 """
 import csv, io, json, re, sys, zipfile, urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 START_YEAR = 2010
@@ -53,7 +53,9 @@ def parse(blob):
                 yield code, row[i_date].strip(), {k: int(row[i].strip()) for k, i in idx.items()}
 
 
-PRICE_SYMS = {"088691": "GC=F", "084691": "SI=F"}  # COMEX 黄金、白银期货连续合约（Yahoo）
+PRICE_SYMS = {"088691": "GC=F", "084691": "SI=F"}  # 黄金用连续合约 GC=F；白银 SI=F 仅用于较早的历史，近期改用主力合约（见 silver_weekly）
+REBUILD_SILVER = "--rebuild-silver" in sys.argv
+MONTH_CODES = "FGHJKMNQUVXZ"   # 1~12 月的期货月份代码
 PRICE_URL = "https://{host}/v8/finance/chart/{sym}?range=20y&interval=1wk"
 
 
@@ -78,7 +80,97 @@ def fetch_weekly(sym):
             continue
         day = datetime.fromtimestamp(t + off, timezone.utc).date().isoformat()
         rows.append([day] + [round(q[k][i], 2) for k in ("open", "high", "low", "close")])
-    return sorted(rows)
+    rows.sort()
+    # Yahoo 周线末尾常多出一行"当天日期"的重复周（与前一行同属一周）：丢掉，保留以周一为日期的那根
+    mon = lambda d: (date.fromisoformat(d) - timedelta(days=date.fromisoformat(d).weekday()))
+    while len(rows) >= 2 and mon(rows[-1][0]) == mon(rows[-2][0]):
+        rows.pop()
+    return rows
+
+
+def fetch_daily(sym, rng, with_volume=False):
+    """Yahoo 日线 -> [[日期, 开, 高, 低, 收(, 量)], ...]；同一天只保留第一条。"""
+    last = None
+    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+        url = f"https://{host}/v8/finance/chart/{sym}?range={rng}&interval=1d"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                res = json.loads(r.read().decode("utf-8"))["chart"]["result"]
+            if not res:
+                raise ValueError("Yahoo 没有这个代码的数据")
+            res = res[0]
+            break
+        except Exception as e:
+            last = e
+    else:
+        raise RuntimeError(last)
+    off, q = res["meta"]["gmtoffset"], res["indicators"]["quote"][0]
+    seen = {}
+    for i, t in enumerate(res["timestamp"]):
+        if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]):
+            continue
+        d = datetime.fromtimestamp(t + off, timezone.utc).date().isoformat()
+        row = [d] + [round(q[k][i], 2) for k in ("open", "high", "low", "close")]
+        if with_volume:
+            row.append(q["volume"][i] or 0)
+        seen.setdefault(d, row)
+    return sorted(seen.values())
+
+
+def pick_silver_contract():
+    """在未来 14 个月的白银合约里，挑最近 10 个交易日成交量最大的一个。"""
+    today = datetime.now(timezone.utc).date()
+    best, best_vol = None, -1
+    for k in range(0, 14):
+        y, m = divmod(today.year * 12 + today.month - 1 + k, 12)
+        sym = f"SI{MONTH_CODES[m]}{str(y)[-2:]}.CMX"
+        try:
+            rows = fetch_daily(sym, "1mo", with_volume=True)
+        except Exception:
+            continue
+        vol = sum(r[5] for r in rows[-10:])
+        if vol > best_vol:
+            best, best_vol = sym, vol
+    if not best or best_vol <= 0:
+        raise RuntimeError("没有找到有成交量的白银合约")
+    print(f"白银主力合约：{best}（最近 10 日成交量 {best_vol}）")
+    return best
+
+
+def to_weekly(daily):
+    """日线按周一分组聚合成周线：开=首日开，高=最高，低=最低，收=末日收。"""
+    weeks = {}
+    for d, o, h, l, c in daily:
+        mon = (date.fromisoformat(d) - timedelta(days=date.fromisoformat(d).weekday())).isoformat()
+        w = weeks.get(mon)
+        if w is None:
+            weeks[mon] = [mon, o, h, l, c]
+        else:
+            w[2] = max(w[2], h); w[3] = min(w[3], l); w[4] = c
+    return [weeks[k] for k in sorted(weeks)]
+
+
+def silver_weekly(old, rebuild):
+    """白银周线：Yahoo 的 SI=F 在非主力月份有大量一字线，所以近期改用成交量最大的主力合约的日线聚合成周线。
+    每次只覆盖最近 3 周并补新周，已存历史不改（主力换月当周有小的价差，不做复权）。
+    首次迁移用 --rebuild-silver：主力合约可用数据之前的周保留 SI=F 周线。"""
+    sym = pick_silver_contract()
+    raw = fetch_daily(sym, "2y", with_volume=True)
+    last_flat = max((i for i, r in enumerate(raw) if r[1] == r[2] == r[3] == r[4]), default=-1)
+    daily = [r[:5] for r in raw[last_flat + 1:]]
+    if len(daily) < 100:
+        raise ValueError(f"{sym} 可用数据只有 {len(daily)} 行")
+    new = to_weekly(daily)[1:]          # 起始那一周不完整，丢掉，沿用原来的整周
+    if rebuild or not old:
+        base = fetch_weekly("SI=F")
+        return [r for r in base if r[0] < new[0][0]] + new
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=21)).isoformat()
+    have = {r[0]: r for r in old}
+    for r in new:
+        if r[0] >= cutoff or r[0] not in have:
+            have[r[0]] = r
+    return [have[k] for k in sorted(have)]
 
 
 def embed_prices(page):
@@ -88,7 +180,7 @@ def embed_prices(page):
     prices = json.loads(m.group(1)) if m else {}
     for code, sym in PRICE_SYMS.items():
         try:
-            rows = fetch_weekly(sym)
+            rows = silver_weekly(prices.get(code), REBUILD_SILVER) if code == "084691" else fetch_weekly(sym)
             if len(rows) < 100:
                 raise ValueError(f"只取到 {len(rows)} 行")
             prices[code] = rows
