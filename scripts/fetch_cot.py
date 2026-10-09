@@ -158,7 +158,7 @@ def silver_weekly(old, rebuild):
     sym = pick_silver_contract()
     raw = fetch_daily(sym, "2y", with_volume=True)
     last_flat = max((i for i, r in enumerate(raw) if r[1] == r[2] == r[3] == r[4]), default=-1)
-    daily = [r[:5] for r in raw[last_flat + 1:]]
+    daily = fix_latest_rows([r[:5] for r in raw[last_flat + 1:]], sym)
     if len(daily) < 100:
         raise ValueError(f"{sym} 可用数据只有 {len(daily)} 行")
     new = to_weekly(daily)[1:]          # 起始那一周不完整，丢掉，沿用原来的整周
@@ -173,6 +173,72 @@ def silver_weekly(old, rebuild):
     return [have[k] for k in sorted(have)]
 
 
+def yahoo_sessions(sym, rng="7d"):
+    """用 Yahoo 小时线合成"交易日"：COMEX 期货每个交易日从前一天美东 18:00 到当天 17:00。
+    返回按日期排序的 [(日期, [开, 高, 低, 收], 小时线根数)]。"""
+    last = None
+    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+        url = f"https://{host}/v8/finance/chart/{sym}?range={rng}&interval=1h"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                res = json.loads(r.read().decode("utf-8"))["chart"]["result"]
+            if not res:
+                raise ValueError("Yahoo 没有这个代码的小时线")
+            res = res[0]
+            break
+        except Exception as e:
+            last = e
+    else:
+        raise RuntimeError(last)
+    off, q = res["meta"]["gmtoffset"], res["indicators"]["quote"][0]
+    sess = {}
+    for i, t in enumerate(res["timestamp"]):
+        if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]):
+            continue
+        et = datetime.fromtimestamp(t + off, timezone.utc)                # 交易所本地时间
+        day = (et + timedelta(hours=6)).date()                            # 18:00 起算下一个交易日
+        if day.weekday() >= 5:
+            continue                                                      # 周五 18:00 之后到周日 18:00 休市
+        r = sess.get(day.isoformat())
+        if r is None:
+            sess[day.isoformat()] = [q["open"][i], q["high"][i], q["low"][i], q["close"][i], 1]
+        else:
+            r[1] = max(r[1], q["high"][i]); r[2] = min(r[2], q["low"][i]); r[3] = q["close"][i]; r[4] += 1
+    return [(d, [round(x, 2) for x in v[:4]], v[4]) for d, v in sorted(sess.items())]
+
+
+def fix_latest_rows(rows, sym):
+    """Yahoo 日线有个毛病：美东 18:00 新交易日开盘之后到午夜之前，最后一根日线是"新交易日刚开盘的几个小时"，
+    却贴着刚结束那一天的日期，把那天完整的日线顶替掉了（北京时间约 06:00~12:00 抓取会撞上）。
+    用小时线合成的交易日识别并修复：某天的日线若开盘价等于"下一个交易日"的开盘价（而不是自己的开盘价），就判定被污染，
+    改用该日自己的小时线合成值；日线里缺失的完整交易日也用小时线补上。小时线抓不到时原样返回。"""
+    try:
+        sess = yahoo_sessions(sym)
+    except Exception as e:
+        print(f"warn: {sym} 小时线抓取失败，最后一根日线可能不准：{e}", file=sys.stderr)
+        return rows
+    by = {r[0]: list(r[:5]) for r in rows}
+    fixed = []
+    for i, (d, ohlc, n) in enumerate(sess):
+        row = by.get(d)
+        nxt = sess[i + 1][1] if i + 1 < len(sess) else None
+        corrupted = bool(row and nxt and abs(row[1] - nxt[0]) <= 0.011 and abs(row[1] - ohlc[0]) > 0.011)
+        if (corrupted or row is None) and n >= 20:
+            by[d] = [d] + ohlc
+            fixed.append(d)
+        elif corrupted:
+            del by[d]
+    if fixed:
+        print(f"{sym}: 用小时线修复了 {len(fixed)} 根被污染/缺失的日线 {fixed}")
+    return [by[k] for k in sorted(by)]
+
+
+def recent_weeks_from_daily(sym):
+    """用修复过的日线聚合最近几周的周线（第一周在 1 个月窗口里可能不完整，丢掉）。"""
+    return to_weekly(fix_latest_rows(fetch_daily(sym, "1mo"), sym))[1:]
+
+
 def embed_prices(page):
     """抓周线并写进 index.html 的 price-data；任何品种失败都保留旧数据。"""
     html = page.read_text(encoding="utf-8")
@@ -180,7 +246,15 @@ def embed_prices(page):
     prices = json.loads(m.group(1)) if m else {}
     for code, sym in PRICE_SYMS.items():
         try:
-            rows = silver_weekly(prices.get(code), REBUILD_SILVER) if code == "084691" else fetch_weekly(sym)
+            if code == "084691":
+                rows = silver_weekly(prices.get(code), REBUILD_SILVER)
+            else:
+                rows = fetch_weekly(sym)
+                try:      # 最近几周：Yahoo 周线末尾可能被新交易日的开盘部分污染，用修复后的日线重新聚合
+                    fresh = {r[0]: r for r in recent_weeks_from_daily(sym)}
+                    rows = sorted([r for r in rows if r[0] not in fresh] + list(fresh.values()))
+                except Exception as e:
+                    print(f"warn: {sym} 最近几周周线修复失败，沿用 Yahoo 周线：{e}", file=sys.stderr)
             if len(rows) < 100:
                 raise ValueError(f"只取到 {len(rows)} 行")
             prices[code] = rows
