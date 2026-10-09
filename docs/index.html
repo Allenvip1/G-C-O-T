@@ -5,11 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>COT 指标看板</title>
 <style>
-  :root{--bg:#0e1116;--panel:#161b22;--line:#2a313c;--text:#d7dde5;--mute:#8b95a3}
-  @media (prefers-color-scheme: light){:root{--bg:#f5f7fa;--panel:#fff;--line:#d9dee5;--text:#1d2530;--mute:#667085}}
+  :root{--bg:#0e1116;--panel:rgba(22,27,34,.62);--line:#2a313c;--text:#d7dde5;--mute:#8b95a3;--ov1:rgba(8,11,16,.28);--ov2:rgba(8,11,16,.42);--glow:rgba(0,0,0,.65)}
+  @media (prefers-color-scheme: light){:root{--bg:#f5f7fa;--panel:rgba(255,255,255,.66);--line:#d9dee5;--text:#1d2530;--mute:#445068;--ov1:rgba(245,247,250,.06);--ov2:rgba(245,247,250,.16);--glow:rgba(255,255,255,.95)}}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  html{background:var(--bg)}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(var(--ov1),var(--ov2)),url(bg.jpg) center/cover no-repeat}
+  .card{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  body{margin:0;background:transparent;color:var(--text);font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
   .wrap{max-width:1500px;margin:0 auto;padding:16px}
+  .hdr{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px 2px;margin-bottom:12px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .col>h2{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px 14px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
   h1{font-size:18px;margin:0 0 4px}
   .sub{color:var(--mute);font-size:12px;margin-bottom:12px}
   .bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px}
@@ -37,6 +42,7 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="hdr">
   <h1>COT 指标看板（Disaggregated）</h1>
   <div class="sub" id="meta">加载中…</div>
   <div class="bar">
@@ -47,6 +53,7 @@
     <span><i style="background:#2962ff"></i>商业套保 Producer/Merchant</span>
     <span><i style="background:#26a69a"></i>大户 Managed Money</span>
     <span><i style="background:#ef5350"></i>散户 Other Reportables</span>
+  </div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="sub">数据：CFTC Disaggregated 报告（期货+期权合并），周二持仓、周五发布。指数 ≥80 标红、≤20 标绿。仅供研究，不构成投资建议。</div>
