@@ -138,7 +138,7 @@ function build(code){
     <div class="card"><h3>周线（COMEX期货连续合约，红涨绿跌；每周K线对齐到当周COT报告日）</h3><div class="chart" style="height:300px"></div></div>
     <div class="card"><h3>净持仓（多头 − 空头，手数）</h3><div class="chart"></div></div>
     <div class="card"><h3>COT 指数（0–100）</h3><div class="chart"></div></div>
-    <div class="card tbcard"><h3>最近 8 周</h3><div class="tbw"><table class="cot-tb"></table></div></div>`;
+    <div class="card tbcard"><h3>最近 30 周</h3><div class="tbw"><table class="cot-tb"></table></div></div>`;
   document.getElementById('grid').appendChild(col);
   const [e0, e1, e2] = col.querySelectorAll('.chart');
   const pr = mkChart(e0, v=>v.toFixed(c.name.includes('SI')?2:1));
@@ -198,7 +198,7 @@ function render(){
     p.net.timeScale().fitContent();
     p.idx.timeScale().fitContent();
     const last = c.dates.length, rows = [];
-    for(let i=last-1;i>=Math.max(0,last-8);i--){
+    for(let i=last-1;i>=Math.max(0,last-30);i--){
       rows.push(`<tr><td>${c.dates[i]}</td><td>${nets.comm[i].toLocaleString()}</td><td>${nets.large[i].toLocaleString()}</td><td>${nets.small[i].toLocaleString()}</td><td>${f(idx.comm[i])}</td><td>${f(idx.large[i])}</td><td>${f(idx.small[i])}</td></tr>`);
     }
     p.tb.innerHTML = '<tr><th>报告日</th><th>商业净持仓</th><th>大户净持仓</th><th>散户净持仓</th><th>商业指数</th><th>大户指数</th><th>散户指数</th></tr>'+rows.join('');
