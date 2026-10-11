@@ -305,6 +305,13 @@ def main():
         out["contracts"][code] = c
         out["order"].append(code)
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    # COT 数据没变化时保持原来的"更新于"时间，避免重复运行产生无意义的提交
+    try:
+        old = json.loads(OUT.read_text(encoding="utf-8"))
+        if {k: v for k, v in old.items() if k != "updated"} == {k: v for k, v in out.items() if k != "updated"}:
+            out["updated"] = old["updated"]
+    except (OSError, ValueError):
+        pass
     blob = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
     OUT.write_text(blob, encoding="utf-8")
     # 把数据内嵌进 index.html（单文件即可打开；预览窗格/双击打开时相对路径的 js 加载不到）
